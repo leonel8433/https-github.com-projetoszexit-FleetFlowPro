@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useFleet } from '../context/FleetContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getFleetStatsAnalysis } from '../services/geminiService';
-import { VehicleStatus, OccurrenceSeverity, Trip, MaintenanceRecord } from '../types';
+import { VehicleStatus, OccurrenceSeverity, Trip, MaintenanceRecord, ScheduledTrip } from '../types';
 
 interface DashboardOverviewProps {
   onStartSchedule?: (id: string) => void;
@@ -65,7 +65,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
 
   const handleResolveMaintQuick = () => {
     if (resolvingMaint) {
-      // No dashboard rápido, mantemos sem alteração de custo ou passamos undefined
       resolveMaintenance(resolvingMaint.vehicleId, resolvingMaint.recordId, resKm, new Date().toISOString());
       setResolvingMaint(null);
       alert(`Veículo ${resolvingMaint.plate} liberado para uso!`);
@@ -90,8 +89,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
     const wps = myActiveTrip.waypoints && myActiveTrip.waypoints.length > 0 
       ? `&waypoints=${myActiveTrip.waypoints.map(w => encodeURIComponent(w)).join('|')}` 
       : '';
-    
-    // Abre no Google Maps App (se houver) ou no browser com modo navegação
     window.open(`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${wps}&travelmode=driving`, '_blank');
   };
 
@@ -108,7 +105,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
     }
   };
 
-  // Edit Trip Functions
   const openEditModal = () => {
     if (myActiveTrip) {
       setEditForm({
@@ -145,7 +141,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
     }
   };
 
-  // Cancel Trip Functions
   const handleCancelTrip = () => {
     if (myActiveTrip) {
       cancelTrip(myActiveTrip.id);
@@ -167,8 +162,10 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
     }
   };
 
+  const activeVehicle = myActiveTrip ? vehicles.find(v => v.id === myActiveTrip.vehicleId) : null;
+
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6 pb-12 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Dashboard Geral</h2>
@@ -210,8 +207,9 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
         </div>
       )}
 
+      {/* Viagem Ativa do Condutor */}
       {!isAdmin && myActiveTrip && (
-        <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-2xl border border-slate-800 overflow-hidden relative group">
+        <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-2xl border border-slate-800 overflow-hidden relative group animate-in slide-in-from-bottom-4">
           <div className="absolute top-4 right-4 flex gap-2">
             <span className="bg-emerald-500 text-white text-[10px] font-write px-2 py-1 rounded-full animate-pulse flex items-center gap-1">
               <i className="fas fa-satellite-dish"></i> EM ROTA
@@ -226,7 +224,7 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
                 </div>
                 <div>
                   <h3 className="text-lg font-write uppercase tracking-tight">Viagem Ativa</h3>
-                  <p className="text-blue-400 text-xs font-bold">{vehicles.find(v => v.id === myActiveTrip.vehicleId)?.plate} • {vehicles.find(v => v.id === myActiveTrip.vehicleId)?.model}</p>
+                  <p className="text-blue-400 text-xs font-bold">{activeVehicle?.plate || '---'} • {activeVehicle?.model || 'Desconhecido'}</p>
                 </div>
               </div>
 
@@ -237,18 +235,13 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
                 </div>
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
                   <p className="text-[10px] text-slate-400 uppercase font-write mb-1">Previsão</p>
-                  <span className="text-sm font-bold">{myActiveTrip.plannedArrival ? new Date(myActiveTrip.plannedArrival).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
-                </div>
-              </div>
-
-              {/* Waypoints badge display */}
-              {myActiveTrip.waypoints && myActiveTrip.waypoints.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  <span className="text-[9px] text-blue-400 uppercase font-write flex items-center gap-1">
-                    <i className="fas fa-map-signs"></i> {myActiveTrip.waypoints.length} Paradas planejadas
+                  <span className="text-sm font-bold">
+                    {myActiveTrip.plannedArrival && !isNaN(new Date(myActiveTrip.plannedArrival).getTime()) 
+                      ? new Date(myActiveTrip.plannedArrival).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                      : '--:--'}
                   </span>
                 </div>
-              )}
+              </div>
             </div>
 
             <div className="w-full md:w-80 flex flex-col gap-3 justify-center">
@@ -279,6 +272,149 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
                 >
                   <i className="fas fa-ban mr-1.5"></i> Cancelar
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Próximas Viagens Agendadas para o Motorista */}
+      {!isAdmin && myScheduledTrips.length > 0 && (
+        <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-500">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-write text-slate-800 uppercase tracking-[0.2em] flex items-center gap-2">
+              <i className="fas fa-calendar-check text-indigo-500"></i> Suas Próximas Viagens
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {myScheduledTrips.map(trip => {
+              const vehicle = vehicles.find(v => v.id === trip.vehicleId);
+              const tripDate = new Date(trip.scheduledDate + 'T00:00:00');
+              const isToday = new Date().toDateString() === tripDate.toDateString();
+
+              return (
+                <div key={trip.id} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-5 hover:border-indigo-200 transition-all group">
+                  <div className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-write shrink-0 border ${isToday ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                    <span className="text-xl leading-none">{tripDate.getDate()}</span>
+                    <span className="text-[9px] uppercase tracking-tighter">{tripDate.toLocaleDateString('pt-BR', { month: 'short' })}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-slate-800 truncate uppercase tracking-tight">{trip.destination}</h4>
+                    <p className="text-[10px] text-slate-400 font-write uppercase tracking-widest">
+                      {vehicle?.plate} • {vehicle?.model}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => onStartSchedule && onStartSchedule(trip.id)}
+                    className="px-5 py-3 bg-indigo-50 text-indigo-600 rounded-2xl text-[10px] font-write uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all border border-indigo-100 group-hover:scale-105"
+                  >
+                    Iniciar Viagem
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Encerramento (Cheguei ao Local) */}
+      {showFinishModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-8 bg-slate-900 text-white text-center">
+              <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-lg shadow-emerald-500/20">
+                <i className="fas fa-flag-checkered"></i>
+              </div>
+              <h3 className="text-xl font-write uppercase tracking-tight">Encerrar Jornada</h3>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Confirme os dados de chegada</p>
+            </div>
+            
+            <div className="p-8 space-y-6">
+              <div>
+                <label className="block text-[10px] font-write text-slate-400 uppercase mb-2 tracking-widest">KM Final no Hodômetro</label>
+                <input 
+                  type="number"
+                  value={endKm}
+                  onChange={(e) => setEndKm(parseInt(e.target.value))}
+                  className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 outline-none font-write text-2xl text-center text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-write text-slate-400 uppercase mb-2">Combustível (R$)</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    value={fuelExpense}
+                    onChange={(e) => setFuelExpense(e.target.value)}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-write text-slate-400 uppercase mb-2">Outras (R$)</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    value={otherExpense}
+                    onChange={(e) => setOtherExpense(e.target.value)}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => setShowFinishModal(false)} className="flex-1 py-4 text-slate-400 font-write uppercase text-[10px] tracking-widest">Voltar</button>
+                <button onClick={confirmFinish} className="flex-[2] py-4 bg-emerald-600 text-white rounded-2xl font-write uppercase text-xs tracking-widest shadow-xl shadow-emerald-100">Finalizar Viagem</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Cancelamento */}
+      {showCancelConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 border border-red-100">
+                <i className="fas fa-exclamation-triangle"></i>
+              </div>
+              <h3 className="text-lg font-write text-slate-800 uppercase tracking-tight">Cancelar Viagem?</h3>
+              <p className="text-slate-400 text-xs font-medium mt-2 leading-relaxed">Isso liberará o veículo imediatamente para outros condutores. Esta ação não pode ser desfeita.</p>
+            </div>
+            <div className="p-6 bg-slate-50 flex gap-3">
+              <button onClick={() => setShowCancelConfirm(false)} className="flex-1 py-4 bg-white border border-slate-200 text-slate-400 rounded-xl font-write uppercase text-[10px] tracking-widest">Manter Viagem</button>
+              <button onClick={handleCancelTrip} className="flex-1 py-4 bg-red-500 text-white rounded-xl font-write uppercase text-[10px] tracking-widest shadow-lg shadow-red-100">Sim, Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Liberação de Manutenção (Admin) */}
+      {resolvingMaint && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in duration-300">
+            <div className="p-8 bg-amber-500 text-white flex items-center gap-4">
+              <i className="fas fa-wrench text-2xl"></i>
+              <div>
+                <h3 className="font-write uppercase tracking-tight">Liberar {resolvingMaint.plate}</h3>
+                <p className="text-[10px] opacity-80 font-bold uppercase">Concluir Manutenção</p>
+              </div>
+            </div>
+            <div className="p-8 space-y-6">
+              <div>
+                <label className="block text-[10px] font-write text-slate-400 uppercase mb-2 tracking-widest">KM na Saída da Oficina</label>
+                <input 
+                  type="number"
+                  value={resKm}
+                  onChange={(e) => setResKm(parseInt(e.target.value))}
+                  className="w-full p-5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-amber-500/10 outline-none font-write text-xl text-center"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setResolvingMaint(null)} className="flex-1 py-4 text-slate-400 font-write uppercase text-[10px] tracking-widest">Cancelar</button>
+                <button onClick={handleResolveMaintQuick} className="flex-[2] py-4 bg-amber-500 text-white rounded-2xl font-write uppercase text-xs tracking-widest shadow-xl shadow-amber-100">Confirmar Retorno</button>
               </div>
             </div>
           </div>
@@ -326,9 +462,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
                       </button>
                     </div>
                   ))}
-                  {editForm.waypoints.length === 0 && (
-                    <p className="text-[10px] text-slate-300 italic text-center py-4">Nenhuma parada intermediária adicionada</p>
-                  )}
                 </div>
               </div>
 
@@ -337,164 +470,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
                 <button type="submit" className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-write uppercase text-xs shadow-xl shadow-blue-100">Salvar Mudanças</button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Confirmação Cancelamento */}
-      {showCancelConfirm && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
-          <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-8 text-center space-y-4">
-              <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto text-3xl">
-                <i className="fas fa-exclamation-triangle"></i>
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-slate-800">Cancelar Viagem?</h3>
-                <p className="text-sm text-slate-500 mt-2">Esta ação interromperá o monitoramento e liberará o veículo imediatamente. Confirmar?</p>
-              </div>
-              <div className="flex flex-col gap-2 pt-4">
-                <button 
-                  onClick={handleCancelTrip}
-                  className="w-full py-4 bg-red-600 text-white rounded-2xl font-write uppercase text-xs tracking-widest shadow-xl shadow-red-100"
-                >
-                  Confirmar Cancelamento
-                </button>
-                <button 
-                  onClick={() => setShowCancelConfirm(false)}
-                  className="w-full py-3 text-slate-400 font-write uppercase text-[10px] tracking-widest"
-                >
-                  Voltar para Viagem
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!isAdmin && !myActiveTrip && myScheduledTrips.length > 0 && (
-        <div className="bg-indigo-50 border border-indigo-100 rounded-3xl p-6">
-          <h3 className="text-sm font-write text-indigo-800 uppercase tracking-widest mb-4 flex items-center gap-2">
-            <i className="fas fa-calendar-check"></i> Meus Próximos Compromissos
-          </h3>
-          <div className="space-y-3">
-            {myScheduledTrips.map(trip => {
-              const vehicle = vehicles.find(v => v.id === trip.vehicleId);
-              const tripDate = new Date(trip.scheduledDate + 'T00:00:00');
-              return (
-                <div key={trip.id} className="bg-white p-4 rounded-2xl border border-indigo-100 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between group gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-indigo-600 text-white rounded-xl flex flex-col items-center justify-center font-write shrink-0">
-                      <span className="text-xs">{tripDate.getDate()}</span>
-                      <span className="text-[8px] uppercase">{tripDate.toLocaleDateString('pt-BR', { month: 'short' })}</span>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-800">{trip.destination}</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase">{vehicle?.plate} • {vehicle?.model}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => onStartSchedule?.(trip.id)}
-                    className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-write uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
-                  >
-                    <i className="fas fa-play"></i> Iniciar Jornada
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {resolvingMaint && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-          <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden">
-            <div className="p-6 bg-amber-500 text-white">
-              <h3 className="text-lg font-write uppercase">Liberar {resolvingMaint.plate}</h3>
-              <p className="text-[10px] font-bold text-amber-100 uppercase mt-1">O veículo voltará a ficar disponível para motoristas</p>
-            </div>
-            <div className="p-8 space-y-6">
-              <div>
-                <label className="block text-xs font-write text-slate-400 uppercase mb-2">KM Atual na Saída da Oficina</label>
-                <input 
-                  type="number" 
-                  value={resKm}
-                  onChange={(e) => setResKm(parseInt(e.target.value))}
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-write text-xl text-center focus:ring-2 focus:ring-amber-500 outline-none"
-                  autoFocus
-                />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setResolvingMaint(null)} className="flex-1 py-3 text-slate-400 font-write uppercase text-[10px]">Cancelar</button>
-                <button onClick={handleResolveMaintQuick} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-write uppercase text-[10px] shadow-lg shadow-emerald-100">Confirmar Retorno</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showFinishModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md">
-          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-6 bg-emerald-600 text-white">
-              <h3 className="text-lg font-write uppercase">Finalizar Percurso</h3>
-            </div>
-            <div className="p-8 space-y-5">
-              <div>
-                <label className="block text-xs font-write text-slate-400 uppercase mb-2 tracking-widest">Hodômetro Final (KM)</label>
-                <input 
-                  type="number"
-                  value={endKm}
-                  onChange={(e) => setEndKm(parseInt(e.target.value))}
-                  className="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none font-write text-2xl text-slate-800 text-center"
-                  placeholder="0"
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-write text-slate-400 uppercase mb-2 tracking-widest">Despesa Combustível (R$)</label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">R$</span>
-                    <input 
-                      type="number"
-                      step="0.01"
-                      value={fuelExpense}
-                      onChange={(e) => setFuelExpense(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-800"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-write text-slate-400 uppercase mb-2 tracking-widest">Outras Despesas (R$)</label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">R$</span>
-                    <input 
-                      type="number"
-                      step="0.01"
-                      value={otherExpense}
-                      onChange={(e) => setOtherExpense(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-800"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-write text-slate-400 uppercase mb-2 tracking-widest">Observações das Despesas</label>
-                <textarea 
-                  value={expenseNotes}
-                  onChange={(e) => setExpenseNotes(e.target.value)}
-                  placeholder="Ex: Pedágio, Alimentação, Estacionamento..."
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-medium min-h-[80px]"
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button onClick={() => setShowFinishModal(false)} className="flex-1 py-4 text-slate-400 font-write uppercase text-[10px]">Cancelar</button>
-                <button onClick={confirmFinish} className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-write uppercase text-xs shadow-xl shadow-emerald-100">Confirmar Chegada</button>
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -524,13 +499,11 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
         </div>
       </div>
 
-      {/* Status da Frota em Tempo Real */}
       <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-sm font-write text-slate-800 uppercase tracking-widest flex items-center gap-2">
             <i className="fas fa-satellite text-blue-500"></i> Status da Frota em Tempo Real
           </h3>
-          <span className="text-[10px] font-bold text-slate-300 uppercase">Total: {vehicles.length} Veículos</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
           {vehicles.map(v => {
@@ -550,17 +523,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onStartSchedule }
           })}
         </div>
       </div>
-
-      {isAdmin && (
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-          <h3 className="text-sm font-write text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
-            <i className="fas fa-brain text-blue-500"></i> Insights da IA
-          </h3>
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 italic text-slate-600 text-sm leading-relaxed">
-            {aiInsights}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
